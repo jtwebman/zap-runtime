@@ -73,9 +73,9 @@ const result = room.call({ :GetUsersMsg });  // type: UserList | NotAuthorizedEr
 
 room.cast({ :Invalid }); // COMPILE ERROR: Invalid is not in ChatRoomProtocol
 
-// Actor state
+// Actor state - includes subscriber PIDs
 type ChatRoomState = {
-  users: Record<UserId, { username: string }>;
+  users: Record<UserId, { username: string; pid: Pid }>;
 };
 
 // Handle messages - pure functional with pattern matching
@@ -84,24 +84,34 @@ function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users
 
   // :TypeName is sugar for __type: "TypeName"
   match(msg, {
-    { :JoinMsg, userId, username }: () => {
-      broadcast(ctx, { :UserJoined, userId, username });
-      return chatRoom(ctx, { ...state, users: { ...state.users, [userId]: { username } } });
+    { :JoinMsg, userId, username, pid }: () => {
+      // Send to each existing user
+      Object.values(state.users).forEach(user =>
+        cast(user.pid, { :UserJoined, userId, username })
+      );
+      return chatRoom(ctx, { ...state, users: { ...state.users, [userId]: { username, pid } } });
     },
     { :ChatMsg, userId, content }: () => {
-      const user = state.users[userId];
-      if (user) {
-        broadcast(ctx, { :NewMessage, userId, username: user.username, content });
+      const sender = state.users[userId];
+      if (sender) {
+        // Send to all users
+        Object.values(state.users).forEach(user =>
+          cast(user.pid, { :NewMessage, userId, username: sender.username, content })
+        );
       }
       return chatRoom(ctx, state);
     },
     { :LeaveMsg, userId }: () => {
       const { [userId]: _, ...users } = state.users;
-      broadcast(ctx, { :UserLeft, userId });
+      // Notify remaining users
+      Object.values(users).forEach(user =>
+        cast(user.pid, { :UserLeft, userId })
+      );
       return chatRoom(ctx, { ...state, users });
     },
-    { :GetUsersMsg }: () => {
-      reply(ctx, { :UserList, users: Object.entries(state.users).map(([id, u]) => ({ userId: id, ...u })) });
+    { :GetUsersMsg, replyTo }: () => {
+      // Explicit reply to caller
+      cast(replyTo, { :UserList, users: Object.entries(state.users).map(([id, u]) => ({ userId: id, ...u })) });
       return chatRoom(ctx, state);
     },
   });
