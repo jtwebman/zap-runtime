@@ -36,89 +36,67 @@ But we want:
 ## Example
 
 ```typescript
-// Define message and response types
+import { Map } from "collections"
+import { spawn, cast, call, link } from "actor"
+
+// Define message types
 // 'type' keyword automatically adds __type field from the type name
-
-// Messages the User actor receives
-type GetUsername = {};
-type UserJoined = { username: string };
-type UserLeft = { username: string };
-type NewMessage = { username: string; content: string };
-
-// Messages the ChatRoom actor receives
-type JoinMsg = { username: string; process: User };
+type JoinMsg = { username: string };
 type LeaveMsg = { username: string };
 type ChatMsg = { username: string; content: string };
+type GetUsers = {};
 
 // Protocol = union of Cast<Msg> and Call<Msg, Response>
 // Cast = fire and forget, Call = request/response
-type UserProtocol =
-  | Cast<UserJoined>
-  | Cast<UserLeft>
-  | Cast<NewMessage>
-  | Call<GetUsername, string>;
-
 type ChatRoomProtocol =
   | Cast<JoinMsg>
   | Cast<LeaveMsg>
-  | Cast<ChatMsg>;
-
-// Define actors by their protocol
-const User = actor<UserProtocol>();
-const ChatRoom = actor<ChatRoomProtocol>();
-
-// Spawn processes
-const room = spawn(ChatRoom);
-const me = spawn(User);
-
-// Call waits for response (typed!)
-const myUsername = me.call({ :GetUsername });  // type: string
-
-// Cast fires and forgets
-room.cast({ :JoinMsg, username: myUsername, process: me });
-room.cast({ :ChatMsg, username: myUsername, content: "Hello!" });
-
-room.cast({ :Invalid }); // COMPILE ERROR: Invalid is not in ChatRoomProtocol
+  | Cast<ChatMsg>
+  | Call<GetUsers, Array<string>>;
 
 // Actor state
 type ChatRoomState = {
-  users: Map<string, { process: User }>;
+  users: Map<string, bool>;
 };
 
-// Handle messages - pure functional with pattern matching
-function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users: Map.empty() }) {
-  const msg = receive(ctx);
-
-  // :TypeName is sugar for __type: "TypeName"
+// Pure handler function - runtime handles the message loop
+function chatRoomHandler(state: ChatRoomState, msg: ChatRoomProtocol): ChatRoomState {
   match(msg, {
-    { :JoinMsg, username, process }: () => {
-      // Notify existing users
-      state.users.forEach((user) =>
-        user.process.cast({ :UserJoined, username })
-      );
-      return { ...state, users: state.users.set(username, { process }) };
+    { :JoinMsg, username }: () => {
+      return { ...state, users: state.users.set(username, true) };
     },
 
     { :ChatMsg, username, content }: () => {
-      // Send to all other users
-      state.users.forEach((user, key) => {
-        if (key !== username) {
-          user.process.cast({ :NewMessage, username, content });
-        }
-      });
+      // Handle chat message
       return state;
     },
 
     { :LeaveMsg, username }: () => {
-      const users = state.users.delete(username);
-      // Notify remaining users
-      users.forEach((user) =>
-        user.process.cast({ :UserLeft, username })
-      );
-      return { ...state, users };
+      return { ...state, users: state.users.delete(username) };
+    },
+
+    { :GetUsers }: () => {
+      return state.users.keys();
     },
   });
 }
+
+// Init function
+function initChatRoom(): ChatRoomState {
+  return { users: Map.empty() };
+}
+
+// Spawn the actor
+const room = spawn(chatRoomHandler, initChatRoom);
+
+// Cast fires and forgets
+room.cast({ :JoinMsg, username: "alice" });
+room.cast({ :ChatMsg, username: "alice", content: "Hello!" });
+
+// Call waits for response (typed!)
+const users = room.call({ :GetUsers });  // type: Array<string>
+
+room.cast({ :Invalid }); // COMPILE ERROR: Invalid is not in ChatRoomProtocol
 ```
 
 ## Language Design Choices
@@ -136,13 +114,6 @@ function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users
 | `string` | Immutable UTF-8 text |
 | `bytes` | Immutable byte sequence (for binary data, I/O, networking) |
 
-**Collections:**
-| Type | Description |
-|------|-------------|
-| `Array<T>` | Immutable indexed collection |
-| `Map<K, V>` | Immutable key-value collection |
-| `Set<T>` | Immutable unique collection |
-
 **Compound:**
 | Type | Description |
 |------|-------------|
@@ -151,6 +122,9 @@ function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users
 | `T?` | Optional - `Some(value)` or `None` - no null! |
 
 ```typescript
+import { Array } from "collections"
+import { print } from "io"
+
 // Primitives
 const count: int = 42;
 const price: decimal(10, 2) = 19.99;
@@ -172,8 +146,8 @@ function find(id: string): User? {
 }
 
 match(find("123"), {
-  { :Some, value }: () => console.log(value.name),
-  { :None }: () => console.log("not found"),
+  { :Some, value }: () => print(value.name),
+  { :None }: () => print("not found"),
 });
 ```
 
@@ -201,7 +175,7 @@ const msg = { username: "alice", content: "hello" };
 
 // Pattern match on any record
 match(msg, {
-  { username, content }: () => console.log(username, content),
+  { username, content }: () => print(`${username}: ${content}`),
 });
 ```
 
@@ -238,8 +212,8 @@ match(msg, {
 
 ```typescript
 match(value, {
-  { :Some, value }: () => console.log(value),
-  { :None }: () => console.log("nothing"),
+  { :Some, value }: () => print(value),
+  { :None }: () => print("nothing"),
 });
 ```
 
@@ -259,9 +233,9 @@ type MyProtocol =
 Spawned processes are typed by their protocol. You can only send messages they accept.
 
 ```typescript
-const user: User = spawn(User);
-user.cast({ :NewMessage, ... });  // OK - NewMessage is in UserProtocol
-user.cast({ :JoinMsg, ... });     // COMPILE ERROR - JoinMsg not in UserProtocol
+const room = spawn(chatRoomHandler, initChatRoom);
+room.cast({ :JoinMsg, username: "alice" });  // OK - JoinMsg is in ChatRoomProtocol
+room.cast({ :Invalid, data: 123 });          // COMPILE ERROR - Invalid not in ChatRoomProtocol
 ```
 
 ### Process lifecycle and linking
@@ -285,7 +259,7 @@ const ChatRoom = actor<ChatRoomProtocol, ChatRoomExit>();
 Link to a process to receive its exit notification:
 
 ```typescript
-const room = spawn(ChatRoom, { link: self() });
+const room = spawn(chatRoomHandler, initChatRoom, { link: self() });
 
 // Tell it to shut down
 room.cast({ :Shutdown });
@@ -296,8 +270,8 @@ type RoomExited = Exited<ChatRoom>;  // derives from ChatRoomExit
 match(msg, {
   { :RoomExited, id, reason }: () => {
     match(reason, {
-      { :Normal }: () => log("room closed"),
-      { :Shutdown, reason }: () => log("room shut down: " + reason),
+      { :Normal }: () => print("room closed"),
+      { :Shutdown, reason }: () => print(`room shut down: ${reason}`),
       { :RoomExpired, roomId }: () => archiveRoom(roomId),
     });
   }
@@ -307,9 +281,11 @@ match(msg, {
 No magic crashes - memory allocation and spawning return `Error<T>` types that must be handled explicitly. Linking is for coordinated lifecycle management, not crash recovery.
 
 ### Immutable data structures
-Built-in immutable `Map`, `Set`, `List` with functional update methods:
+Immutable `Map`, `Set`, `Array` from the collections library:
 
 ```typescript
+import { Map } from "collections"
+
 const users = Map.empty<string, User>();
 const updated = users.set("alice", user);  // returns new Map
 const removed = updated.delete("alice");   // returns new Map
@@ -409,7 +385,7 @@ const users = await room.getUsers();  // Promise<UserList>
 | `int` | `number` (with overflow check → error) |
 | `bigint` | `BigInt` |
 | `float` | `number` |
-| `decimal` | TBD (decimal.js or custom) |
+| `decimal` | decimal.js |
 | `string` | `string` |
 | `bytes` | `Uint8Array` |
 | `Array<T>` | `Array<T>` |
@@ -421,7 +397,7 @@ const users = await room.getUsers();  // Promise<UserList>
 ## Standard Library
 
 **Keywords (not functions):**
-- `const`, `let`, `type`, `function`, `match`, `try`, `return`, `if`, `else`, `for`, `while`
+- `const`, `let`, `type`, `function`, `match`, `try`, `return`, `if`, `else`, `while`, `do`, `break`, `continue`, `import`, `export`
 
 **Built-in types (no import):**
 - Primitives: `bool`, `int`, `bigint`, `float`, `decimal`, `string`, `bytes`
