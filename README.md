@@ -646,7 +646,16 @@ const d: decimal(10,4) = 1.0000 + c;     // COMPILE ERROR: decimal(10,4) + decim
 | `\|\|` | or |
 | `!` | not |
 
-No custom operators. No cross-type operations.
+No custom operators. No cross-type operations. No currying. No pipe operator.
+
+Keep it simple - use explicit variable bindings:
+
+```typescript
+const id = try getUserId();
+const user = try fetchUser(db, id);
+const validated = try validateUser(rules, user);
+const saved = try saveUser(db, validated);
+```
 
 ## Strings
 
