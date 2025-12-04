@@ -56,24 +56,22 @@ room.send({ type: "Message", userId: id, content: "Hello!" });
 
 room.send({ type: "Invalid" }); // COMPILE ERROR: 'Invalid' is not a valid message type
 
-// Handle messages in the actor
-function chatRoom(ctx: Context<typeof ChatRoom>) {
-  const users = new Map<UserId, User>();
+// Handle messages in the actor - pure functional, no classes
+function chatRoom(ctx, state = {}) {
+  const msg = receive(ctx);
 
-  while (true) {
-    const msg = ctx.receive();
-
-    switch (msg.type) {
-      case "Join":
-        users.set(msg.userId, { username: msg.username });
-        ctx.broadcast({ type: "UserJoined", userId: msg.userId, username: msg.username });
-        break;
-      case "Message":
-        const user = users.get(msg.userId);
-        if (user) {
-          ctx.broadcast({ type: "NewMessage", userId: msg.userId, username: user.username, content: msg.content });
-        }
-        break;
+  switch (msg.type) {
+    case "Join": {
+      const users = { ...state.users, [msg.userId]: { username: msg.username } };
+      broadcast(ctx, { type: "UserJoined", userId: msg.userId, username: msg.username });
+      return chatRoom(ctx, { ...state, users }); // tail-recursive loop
+    }
+    case "Message": {
+      const user = state.users?.[msg.userId];
+      if (user) {
+        broadcast(ctx, { type: "NewMessage", userId: msg.userId, username: user.username, content: msg.content });
+      }
+      return chatRoom(ctx, state);
     }
   }
 }
