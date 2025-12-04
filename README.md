@@ -32,22 +32,51 @@ But we want:
 
 ## Example
 
-```zig
-const ChatRoomProtocol = Protocol(.{
-    .receives = .{
-        Join: struct { user_id: UserId, username: []const u8 },
-        Message: struct { user_id: UserId, content: []const u8 },
-    },
-    .sends = .{
-        UserJoined: struct { user_id: UserId, username: []const u8 },
-        NewMessage: struct { user_id: UserId, content: []const u8 },
-    },
+```typescript
+// Define what messages an actor can receive and send
+const ChatRoom = actor({
+  receives: {
+    Join: { userId: UserId, username: string },
+    Leave: { userId: UserId },
+    Message: { userId: UserId, content: string },
+  },
+  sends: {
+    UserJoined: { userId: UserId, username: string },
+    UserLeft: { userId: UserId },
+    NewMessage: { userId: UserId, username: string, content: string },
+  },
 });
 
-// Compile-time error if you send the wrong message type
-const room = try spawn(ChatRoom);
-try room.send(.{ .Join = .{ .user_id = id, .username = "alice" } });
-try room.send(.{ .WrongType = .{} }); // COMPILE ERROR!
+// Spawn a new process
+const room = spawn(ChatRoom);
+
+// Type-safe message sending
+room.send({ type: "Join", userId: id, username: "alice" });
+room.send({ type: "Message", userId: id, content: "Hello!" });
+
+room.send({ type: "Invalid" }); // COMPILE ERROR: 'Invalid' is not a valid message type
+
+// Handle messages in the actor
+function chatRoom(ctx: Context<typeof ChatRoom>) {
+  const users = new Map<UserId, User>();
+
+  while (true) {
+    const msg = ctx.receive();
+
+    switch (msg.type) {
+      case "Join":
+        users.set(msg.userId, { username: msg.username });
+        ctx.broadcast({ type: "UserJoined", userId: msg.userId, username: msg.username });
+        break;
+      case "Message":
+        const user = users.get(msg.userId);
+        if (user) {
+          ctx.broadcast({ type: "NewMessage", userId: msg.userId, username: user.username, content: msg.content });
+        }
+        break;
+    }
+  }
+}
 ```
 
 ## Roadmap
