@@ -312,6 +312,44 @@ match(result, {
 - [ ] Interpreter
 - [ ] Simple compiler frontend
 
+## Memory Model
+
+Zap uses **per-process garbage collection** inspired by BEAM:
+
+- **Isolated heaps** - Each process has its own heap, no shared memory
+- **Per-process GC** - When GC runs, only that one process pauses (microseconds, not milliseconds)
+- **Message copying** - Messages are copied between processes, no shared references
+- **Instant cleanup** - When a process dies, its entire heap is freed at once
+
+```
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│   Process A     │  │   Process B     │  │   Process C     │
+│   ┌─────────┐   │  │   ┌─────────┐   │  │   ┌─────────┐   │
+│   │  Heap   │   │  │   │  Heap   │   │  │   │  Heap   │   │
+│   │ (64KB)  │   │  │   │ (128KB) │   │  │   │ (32KB)  │   │
+│   └─────────┘   │  │   └─────────┘   │  │   └─────────┘   │
+│   GC: 50μs      │  │   GC: 100μs     │  │   GC: 25μs      │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+        ↑
+    GC happens here,
+    other processes
+    keep running
+```
+
+**Why this works:**
+- No global "stop the world" pauses
+- Small heaps = fast GC (microseconds)
+- Process isolation = independent GC scheduling
+- Short-lived processes may never GC at all
+
+**Message passing:**
+```typescript
+// Messages are COPIED, not shared
+processA.cast({ :Data, value: largeObject });
+// processA and processB each have their own copy
+// No shared references, no data races
+```
+
 ## Implementation
 
 The Zap compiler and runtime are written in **Zig** because:
