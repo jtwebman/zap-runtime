@@ -34,20 +34,20 @@ But we want:
 
 ```typescript
 // Define message and response types
-// :TypeName is sugar for __type: "TypeName"
-type JoinMsg = { :JoinMsg; userId: UserId; username: string };
-type LeaveMsg = { :LeaveMsg; userId: UserId };
-type ChatMsg = { :ChatMsg; userId: UserId; content: string };
-type GetUsersMsg = { :GetUsersMsg };
+// 'type' keyword automatically adds __type field from the type name
+type JoinMsg = { userId: UserId; username: string };
+type LeaveMsg = { userId: UserId };
+type ChatMsg = { userId: UserId; content: string };
+type GetUsersMsg = {};
 
-type UserJoined = { :UserJoined; userId: UserId; username: string };
-type UserLeft = { :UserLeft; userId: UserId };
-type NewMessage = { :NewMessage; userId: UserId; username: string; content: string };
-type UserList = { :UserList; users: Array<{ userId: UserId; username: string }> };
+type UserJoined = { userId: UserId; username: string };
+type UserLeft = { userId: UserId };
+type NewMessage = { userId: UserId; username: string; content: string };
+type UserList = { users: Array<{ userId: UserId; username: string }> };
 
 // Error types
-type NotFoundError = { :NotFoundError; message: string };
-type NotAuthorizedError = { :NotAuthorizedError; message: string };
+type NotFoundError = { message: string };
+type NotAuthorizedError = { message: string };
 
 // Protocol defines message -> response mapping
 // void = fire and forget (cast), type = expects response (call)
