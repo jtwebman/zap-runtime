@@ -312,6 +312,28 @@ match(result, {
 - [ ] Interpreter
 - [ ] Simple compiler frontend
 
+### Phase 5: JavaScript Target
+
+Compile Zap to idiomatic JavaScript - not a runtime emulation, just clean JS:
+
+```typescript
+// Zap source
+const room = spawn(ChatRoom);
+room.cast({ :JoinMsg, username: "alice" });
+const users = room.call({ :GetUsers });
+
+// Compiles to JavaScript
+const room = new ChatRoom();
+room.joinMsg({ username: "alice" });  // Promise<void>
+const users = await room.getUsers();  // Promise<UserList>
+```
+
+- [ ] Actors → Classes with async methods
+- [ ] Functions → Functions
+- [ ] Types → TypeScript definitions (.d.ts)
+- [ ] Pattern matching → switch/if-else
+- [ ] Immutable collections → Native JS (or Immer)
+
 ## Memory Model
 
 Zap uses **per-process garbage collection** inspired by BEAM:
