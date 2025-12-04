@@ -40,11 +40,12 @@ import { Map } from "collections";
 import { spawn } from "actor";
 
 // Tagged union for messages
+// Variants with => return a response, others are fire-and-forget
 type ChatRoomMsg =
   | Join { username: string }
   | Leave { username: string }
   | Chat { username: string, content: string }
-  | GetUsers {};
+  | GetUsers {} => Array<string>;
 
 // Actor state
 type ChatRoomState = {
@@ -78,9 +79,12 @@ function initChatRoom(): ChatRoomState {
 // Spawn the actor
 const room = spawn(chatRoomHandler, initChatRoom);
 
-// Send messages
+// Fire and forget (no => in type)
 room.send(Join { username: "alice" });
 room.send(Chat { username: "alice", content: "Hello!" });
+
+// Request/response (has => in type, returns Array<string>)
+const users = room.send(GetUsers {});
 
 // COMPILE ERROR: Invalid is not in ChatRoomMsg
 room.send(Invalid { data: 123 });
@@ -183,6 +187,16 @@ type Result =
 type Option<T> =
   | Some { value: T }
   | None {};
+```
+
+For actor messages, use `=>` to indicate variants that return a response:
+
+```typescript
+type ChatMsg =
+  | Join { username: string }              // fire and forget
+  | Leave { username: string }             // fire and forget
+  | GetUsers {} => Array<string>           // returns Array<string>
+  | GetUser { id: string } => User?;       // returns User?
 ```
 
 ### Pattern Matching
