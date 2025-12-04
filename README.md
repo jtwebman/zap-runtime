@@ -1,6 +1,6 @@
 # Zap
 
-A BEAM-inspired runtime written in Zig with static typing, predictable latency, and per-process dependency versioning.
+A statically-typed, functional programming language with BEAM-inspired concurrency - lightweight processes, message passing, and fault isolation.
 
 > **Status:** Early development. Follow along as we build this in public.
 
@@ -312,12 +312,14 @@ match(result, {
 - [ ] Interpreter
 - [ ] Simple compiler frontend
 
-## Why Zig?
+## Implementation
+
+The Zap compiler and runtime are written in **Zig** because:
 
 - **Comptime** - Powerful compile-time metaprogramming for our type system
 - **No hidden control flow** - Matches our "explicit everything" philosophy
 - **C interop** - Can use existing C libraries seamlessly
-- **Performance** - Zero-cost abstractions, no GC pauses
+- **Performance** - Zero-cost abstractions, predictable latency, no GC pauses
 
 ## Prior Art & Inspiration
 
