@@ -137,12 +137,30 @@ class User { constructor(...) { ... } }
 ### `type` only, no `interface`
 Unlike TypeScript, there's no `interface` vs `type` confusion. Just use `type` for everything.
 
-### Structural typing with auto-tagging
-Types are structural (same shape = compatible), but the `type` keyword automatically adds a `__type` tag for pattern matching.
+### Records and Types
+`{}` is a record - just a bag of key-value pairs. Pattern matching works on records directly.
+
+```typescript
+// A plain record
+const msg = { username: "alice", content: "hello" };
+
+// Pattern match on any record
+match(msg, {
+  { username, content }: () => console.log(username, content),
+});
+```
+
+`type` creates a named record that automatically includes a `__type` property. This is just sugar for easier pattern matching - under the hood, everything is records and pattern matching.
 
 ```typescript
 type JoinMsg = { username: string };
-// Compiler generates: { __type: "JoinMsg", username: string }
+// Equivalent to a record with: { __type: "JoinMsg", username: string }
+
+// So you can pattern match on the __type
+match(msg, {
+  { __type: "JoinMsg", username }: () => ...,
+  { __type: "LeaveMsg", username }: () => ...,
+});
 ```
 
 ### `:TypeName` syntax
