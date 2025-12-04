@@ -16,7 +16,7 @@ We love what Erlang/BEAM gives us:
 But we want:
 
 - **Static types** - Catch errors at compile time, not in production at 3am
-- **Tagged unions** - Know exactly what messages an actor accepts
+- **Tagged records** - Know exactly what messages an actor accepts
 - **C-style syntax** - Familiar to most developers (not ML-style)
 - **Single-file deployment** - Compile to one bundled executable
 - **Signed packages** - Code signing for secure distribution
@@ -27,8 +27,8 @@ But we want:
 | Feature          | BEAM                        | Zap                                       |
 | ---------------- | --------------------------- | ----------------------------------------- |
 | Type system      | Dynamic                     | Fully static, compile-time verified       |
-| Message types    | Any term                    | Tagged unions, verified at compile time   |
-| Error handling   | Exceptions + "let it crash" | Tagged unions, explicit propagation       |
+| Message types    | Any term                    | Tagged records, verified at compile time  |
+| Error handling   | Exceptions + "let it crash" | Tagged records, explicit propagation      |
 | Deployment       | Release packages            | Single bundled executable (.zpc)          |
 | Package security | Trust-based                 | Code signing with verification            |
 | JIT pauses       | Yes (with JIT)              | No - AOT compiled                         |
@@ -39,8 +39,8 @@ But we want:
 import { Map } from "collections";
 import { spawn } from "actor";
 
-// Tagged union for messages
-// All variants declare their return type
+// Function signatures (tagged records with return types)
+// All variants declare their return type with =>
 type ChatRoomMsg =
   | Join { username: string } => void
   | Leave { username: string } => void
@@ -167,10 +167,14 @@ Unlike TypeScript, there's no `interface` vs `type` confusion. Just use `type` f
 const msg = { username: "alice", content: "hello" };
 ```
 
-### Tagged Unions
-Use tagged unions for types that can be one of several variants:
+### Tagged Records and Function Signatures
 
+**Tagged record** - a named type with fields:
 ```typescript
+// Single tagged record
+type User { username: string, age: int }
+
+// Union of tagged records
 type Result =
   | Success { value: int }
   | Error { message: string };
@@ -180,9 +184,12 @@ type Option<T> =
   | None {};
 ```
 
-For actor messages, all variants declare their return type with `=>`:
-
+**Function signature** - a tagged record with a return type:
 ```typescript
+// Single function signature
+type GetUser { id: string } => User?
+
+// Union of function signatures (actor messages)
 type ChatMsg =
   | Join { username: string } => void      // returns void
   | Leave { username: string } => void     // returns void
@@ -196,8 +203,10 @@ room.send(Join { username: "alice" });
 const users = room.call(GetUsers {});
 ```
 
+Types are just types - `match` works on any tagged record, `spawn` works with handlers that accept function signatures.
+
 ### Pattern Matching
-`match` on tagged unions. Compiler ensures all cases are handled (exhaustive):
+`match` on tagged records. Compiler ensures all cases are handled (exhaustive):
 
 ```typescript
 match (result) {
@@ -238,7 +247,7 @@ room.send(Invalid { data: 123 });          // COMPILE ERROR - Invalid not in Cha
 
 ### Process lifecycle and linking
 
-Define exit reasons as a tagged union:
+Define exit reasons as a tagged record:
 
 ```typescript
 // Custom exit reasons for coordinated shutdown
@@ -293,7 +302,7 @@ const bigArray = builder.build();  // one allocation at the end
 ```
 
 ### Explicit error handling
-No exceptions. Use tagged unions for results:
+No exceptions. Use tagged records for results:
 
 ```typescript
 type FetchResult =
@@ -395,7 +404,7 @@ await room.join({ username: "alice" });
 
 **Built-in types (no import):**
 - Primitives: `bool`, `int`, `bigint`, `float`, `decimal`, `string`, `bytes`
-- Structural: `{ }` records, `(T, U)` tuples, tagged unions
+- Structural: `{ }` records, `(T, U)` tuples, tagged records
 - Special: `T?` (optional)
 
 **Everything else is imported:**
@@ -495,7 +504,7 @@ Actors are pure functions. The runtime handles the message loop.
 ```typescript
 import { Map } from "collections";
 
-// Message type - all variants have => return type
+// Function signatures - all variants have => return type
 type ChatRoomMsg =
   | Join { username: string, user: User } => void
   | Leave { username: string } => void
