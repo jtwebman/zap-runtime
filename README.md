@@ -33,18 +33,31 @@ But we want:
 ## Example
 
 ```typescript
-// Define what messages an actor can receive and send
-const ChatRoom = actor({
-  receives: {
-    Join: { userId: UserId, username: string },
-    Leave: { userId: UserId },
-    Message: { userId: UserId, content: string },
-  },
-  sends: {
-    UserJoined: { userId: UserId, username: string },
-    UserLeft: { userId: UserId },
-    NewMessage: { userId: UserId, username: string, content: string },
-  },
+// Define message types with interfaces
+interface JoinMsg {
+  type: "Join";
+  userId: UserId;
+  username: string;
+}
+
+interface LeaveMsg {
+  type: "Leave";
+  userId: UserId;
+}
+
+interface ChatMsg {
+  type: "Message";
+  userId: UserId;
+  content: string;
+}
+
+// Union type for all messages this actor receives
+type ChatRoomReceives = JoinMsg | LeaveMsg | ChatMsg;
+
+// Define the actor's protocol
+const ChatRoom = actor<ChatRoomReceives>({
+  receives: ["Join", "Leave", "Message"],
+  sends: ["UserJoined", "UserLeft", "NewMessage"],
 });
 
 // Spawn a new process
@@ -56,8 +69,13 @@ room.send({ type: "Message", userId: id, content: "Hello!" });
 
 room.send({ type: "Invalid" }); // COMPILE ERROR: 'Invalid' is not a valid message type
 
-// Handle messages in the actor - pure functional, no classes
-function chatRoom(ctx, state = {}) {
+// Actor state as an interface
+interface ChatRoomState {
+  users: Record<UserId, { username: string }>;
+}
+
+// Handle messages - pure functional, no classes
+function chatRoom(ctx: Context<ChatRoom>, state: ChatRoomState = { users: {} }) {
   const msg = receive(ctx);
 
   switch (msg.type) {
@@ -67,11 +85,16 @@ function chatRoom(ctx, state = {}) {
       return chatRoom(ctx, { ...state, users }); // tail-recursive loop
     }
     case "Message": {
-      const user = state.users?.[msg.userId];
+      const user = state.users[msg.userId];
       if (user) {
         broadcast(ctx, { type: "NewMessage", userId: msg.userId, username: user.username, content: msg.content });
       }
       return chatRoom(ctx, state);
+    }
+    case "Leave": {
+      const { [msg.userId]: _, ...users } = state.users;
+      broadcast(ctx, { type: "UserLeft", userId: msg.userId });
+      return chatRoom(ctx, { ...state, users });
     }
   }
 }
