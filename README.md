@@ -78,34 +78,32 @@ type ChatRoomState = {
   users: Record<UserId, { username: string }>;
 };
 
-// Handle messages - pure functional
+// Handle messages - pure functional with pattern matching
 function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users: {} }) {
   const msg = receive(ctx);
 
-  switch (msg.type) {
-    case "Join": {
-      const users = { ...state.users, [msg.userId]: { username: msg.username } };
-      broadcast(ctx, { type: "UserJoined", userId: msg.userId, username: msg.username });
-      return chatRoom(ctx, { ...state, users });
-    }
-    case "Message": {
-      const user = state.users[msg.userId];
+  match(msg, {
+    { type: "Join", userId, username }: () => {
+      broadcast(ctx, { type: "UserJoined", userId, username });
+      return chatRoom(ctx, { ...state, users: { ...state.users, [userId]: { username } } });
+    },
+    { type: "Message", userId, content }: () => {
+      const user = state.users[userId];
       if (user) {
-        broadcast(ctx, { type: "NewMessage", userId: msg.userId, username: user.username, content: msg.content });
+        broadcast(ctx, { type: "NewMessage", userId, username: user.username, content });
       }
       return chatRoom(ctx, state);
-    }
-    case "Leave": {
-      const { [msg.userId]: _, ...users } = state.users;
-      broadcast(ctx, { type: "UserLeft", userId: msg.userId });
+    },
+    { type: "Leave", userId }: () => {
+      const { [userId]: _, ...users } = state.users;
+      broadcast(ctx, { type: "UserLeft", userId });
       return chatRoom(ctx, { ...state, users });
-    }
-    case "GetUsers": {
-      // reply() sends response back to caller
+    },
+    { type: "GetUsers" }: () => {
       reply(ctx, { users: Object.entries(state.users).map(([id, u]) => ({ userId: id, ...u })) });
       return chatRoom(ctx, state);
-    }
-  }
+    },
+  });
 }
 ```
 
