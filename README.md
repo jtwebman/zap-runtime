@@ -425,11 +425,12 @@ const users = await room.getUsers();  // Promise<UserList>
 
 **Built-in types (no import):**
 - Primitives: `bool`, `int`, `bigint`, `float`, `decimal`, `string`, `bytes`
-- Collections: `Array<T>`, `Map<K,V>`, `Set<T>`
-- Core: `Error<T>`
+- Structural: `{ }` records, `(T, U)` tuples
+- Special: `Error<T>`, `T?`
 
 **Everything else is imported:**
 ```typescript
+import { Array, Map, Set } from "collections"
 import { spawn, cast, call, self, receive, link } from "actor"
 import { print, panic } from "io"
 import { read, write } from "fs"
@@ -443,6 +444,238 @@ import { env, args } from "os"
 ```
 
 This makes every capability explicit - AI tools can learn the module catalog and the pattern is always the same.
+
+**Generic functions:**
+```typescript
+function map<T, U>(arr: Array<T>, fn: (item: T) => U): Array<U> {
+  // ...
+}
+```
+
+## Control Flow
+
+**Functional iteration (no `for` keyword):**
+```typescript
+items.each((item) => { ... })
+items.map((item) => item.name)
+items.filter((item) => item.active)
+items.reduce(0, (acc, item) => acc + item.value)
+items.eachWithIndex((item, i) => { ... })
+users.each((key, value) => { ... })  // maps
+```
+
+**Imperative loops for stateful code:**
+```typescript
+while (condition) { }
+do { } while (condition)
+
+// break/continue work in while loops
+while (true) {
+  if (done) break;
+  if (skip) continue;
+}
+```
+
+**No recursion allowed:**
+```typescript
+// COMPILE ERROR: Recursion not allowed
+function factorial(n: int): int {
+  if (n <= 1) return 1;
+  return n * factorial(n - 1);  // error: calls itself
+}
+
+// OK: Use while instead
+function factorial(n: int): int {
+  let result = 1;
+  let i = n;
+  while (i > 1) {
+    result = result * i;
+    i = i - 1;
+  }
+  return result;
+}
+```
+
+The compiler detects both direct and mutual recursion (A calls B calls A). This makes resource usage predictable and prevents stack overflows. Use explicit data structures (stacks, queues) for tree-like algorithms.
+
+## Mutability
+
+**Variables can be `const` or `let`:**
+```typescript
+const x = 5;
+x = 6;  // COMPILE ERROR: cannot rebind const
+
+let y = 5;
+y = 6;  // OK: let can be rebound
+```
+
+**All data structures are immutable.** `let` means the variable can point to a new value:
+```typescript
+let items = [1, 2, 3];
+items = items.push(4);  // items now points to new array [1,2,3,4]
+// original [1,2,3] is unchanged
+```
+
+No mutable data structures, no shared mutable state, no data races.
+
+## Actor Lifecycle
+
+Actors are pure functions. The runtime handles the message loop.
+
+```typescript
+// Define state type
+type ChatRoomState = { users: Map<string, User> };
+
+// Actor definition - links protocol to state type
+const ChatRoom = actor<ChatRoomProtocol, ChatRoomState>();
+
+// Pure handler function
+function chatRoomHandler(state: ChatRoomState, msg: ChatRoomProtocol): ChatRoomState {
+  match(msg, {
+    { :JoinMsg, username, user }: () => ({ ...state, users: state.users.set(username, user) }),
+  })
+}
+
+// Optional init and terminate functions
+function initChatRoom(): ChatRoomState {
+  return { users: Map.empty() };
+}
+
+function termChatRoom(state: ChatRoomState): void {
+  saveToDb(state);
+}
+
+// Spawn variants
+const room1 = spawn(chatRoomHandler, initChatRoom, termChatRoom);
+const room2 = spawn(chatRoomHandler, initChatRoom);              // no terminate
+const room3 = spawn(chatRoomHandler, { users: Map.empty() });    // direct state
+```
+
+**Spawn signature:**
+```typescript
+spawn<S>(
+  handler: (state: S, msg: P) => S,
+  init: S | () => S,
+  terminate?: (state: S) => void
+)
+```
+
+## Testing
+
+Built-in test runner with functional test library:
+
+```bash
+zap test              # runs all *_test.zap files
+zap test src/chat     # runs tests in specific path
+```
+
+```typescript
+import { describe, it, expect, setup, singleton } from "test"
+
+// Shared across all tests (one instance per test run)
+const dbPool = singleton(
+  () => createPool("postgres://..."),
+  (pool) => pool.close()
+);
+
+// Fresh for each describe/it
+const cache = setup(
+  () => createCache(),
+  (c) => c.clear()
+);
+
+describe("UserRepository", (dbPool), (pool) => {
+  it("saves user", () => {
+    const conn = pool.acquire();
+    conn.save(user);
+    conn.release();
+  });
+});
+
+describe("CachedUserRepo", (dbPool, cache), (pool, cache) => {
+  it("caches", () => {
+    pool.acquire().save(user);
+    cache.set(user.id, user);
+  });
+});
+
+// No resources needed
+describe("pure functions", () => {
+  it("adds numbers", () => {
+    expect(add(1, 2)).toBe(3);
+  });
+});
+```
+
+- `singleton()` - one instance for entire test run
+- `setup()` - fresh instance per describe/it
+- Tuple for multiple resources
+- Actors are pure functions, so just call handlers directly and assert on state
+
+## Operators
+
+**Arithmetic (`int`, `bigint`, `float`, `decimal` - same type only):**
+
+| Operator | Description |
+|----------|-------------|
+| `+` | add |
+| `-` | subtract |
+| `*` | multiply |
+| `/` | divide |
+| `%` | modulo |
+
+```typescript
+const a: int = 5 + 3;        // OK
+const b: int = 5 + 3.0;      // COMPILE ERROR: int + float
+const c: decimal(10,2) = 19.99 + 5.00;   // OK: same precision/scale
+const d: decimal(10,4) = 1.0000 + c;     // COMPILE ERROR: decimal(10,4) + decimal(10,2)
+```
+
+**Comparison (same type only):**
+
+| Operator | Description |
+|----------|-------------|
+| `==`, `!=` | equality |
+| `<`, `>`, `<=`, `>=` | ordering |
+
+**Logical (`bool` only):**
+
+| Operator | Description |
+|----------|-------------|
+| `&&` | and |
+| `\|\|` | or |
+| `!` | not |
+
+No custom operators. No cross-type operations.
+
+## Strings
+
+No `+` for strings. Three options:
+
+```typescript
+import { format } from "fmt"
+import { StringBuilder } from "str"
+
+// Backticks for interpolation
+const msg = `${name} has ${count} items`;
+
+// Format for complex formatting
+const report = format("{} - {.2f}%", label, percentage);
+
+// StringBuilder for efficient building (one allocation)
+const html = StringBuilder.new()
+  .push("<div>")
+  .push(content)
+  .push("</div>")
+  .join();
+
+// With separator
+const path = StringBuilder.new()
+  .push(base)
+  .push(folder)
+  .push(file)
+  .join("/");  // "base/folder/file"
+```
 
 ## Memory Model
 
