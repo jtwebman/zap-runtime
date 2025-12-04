@@ -120,6 +120,99 @@ function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users
 }
 ```
 
+## Language Design Choices
+
+### Types, not classes
+No `class` keyword. Just `type` for data and `function` for behavior. Keeps things simple and functional.
+
+```typescript
+// Yes
+type User = { name: string; age: number };
+function createUser(name: string, age: number): User { ... }
+
+// No classes
+class User { constructor(...) { ... } }
+```
+
+### `type` only, no `interface`
+Unlike TypeScript, there's no `interface` vs `type` confusion. Just use `type` for everything.
+
+### Structural typing with auto-tagging
+Types are structural (same shape = compatible), but the `type` keyword automatically adds a `__type` tag for pattern matching.
+
+```typescript
+type JoinMsg = { username: string };
+// Compiler generates: { __type: "JoinMsg", username: string }
+```
+
+### `:TypeName` syntax
+Shorthand for the `__type` field when creating values or pattern matching:
+
+```typescript
+// Creating a value
+room.cast({ :JoinMsg, username: "alice" });
+// Equivalent to: { __type: "JoinMsg", username: "alice" }
+
+// Pattern matching
+match(msg, {
+  { :JoinMsg, username }: () => { ... },
+  { :LeaveMsg, username }: () => { ... },
+});
+```
+
+### Pattern matching on structure
+`match()` matches on actual structure, not type names. Destructuring is built-in.
+
+```typescript
+match(value, {
+  { :Some, value }: () => console.log(value),
+  { :None }: () => console.log("nothing"),
+});
+```
+
+### Protocols with `Cast<T>` and `Call<T, R>`
+Actor protocols are unions of message types:
+- `Cast<Msg>` - fire and forget
+- `Call<Msg, Response>` - request/response (can include error types)
+
+```typescript
+type MyProtocol =
+  | Cast<PingMsg>
+  | Cast<NotifyMsg>
+  | Call<GetDataMsg, Data | NotFoundError>;
+```
+
+### Typed process references
+Spawned processes are typed by their protocol. You can only send messages they accept.
+
+```typescript
+const user: User = spawn(User);
+user.cast({ :NewMessage, ... });  // OK - NewMessage is in UserProtocol
+user.cast({ :JoinMsg, ... });     // COMPILE ERROR - JoinMsg not in UserProtocol
+```
+
+### Immutable data structures
+Built-in immutable `Map`, `Set`, `List` with functional update methods:
+
+```typescript
+const users = Map.empty<string, User>();
+const updated = users.set("alice", user);  // returns new Map
+const removed = updated.delete("alice");   // returns new Map
+```
+
+### Explicit error handling
+No exceptions. Use union types for errors:
+
+```typescript
+type Result = Data | NotFoundError | NotAuthorizedError;
+
+match(result, {
+  { :Data, value }: () => use(value),
+  { :NotFoundError, message }: () => log(message),
+  { :NotAuthorizedError, message }: () => deny(),
+});
+```
+
 ## Roadmap
 
 ### Phase 1: Core Runtime (In Progress)
