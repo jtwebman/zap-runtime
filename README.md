@@ -147,7 +147,7 @@ function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users
 |------|-------------|
 | `{ ... }` | Record - bag of key-value pairs |
 | `(T, U, V)` | Tuple - fixed-size, positional |
-| `Option<T>` | `Some(value)` or `None` - no null! |
+| `T?` | Optional - `Some(value)` or `None` - no null! |
 
 ```typescript
 // Primitives
@@ -165,8 +165,8 @@ function divmod(a: int, b: int): (int, int) {
 }
 const (quotient, remainder) = divmod(10, 3);
 
-// Option instead of null
-function find(id: string): Option<User> {
+// Optional with ? instead of null
+function find(id: string): User? {
   // return Some(user) or None
 }
 
