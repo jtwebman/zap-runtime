@@ -122,13 +122,67 @@ function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users
 
 ## Language Design Choices
 
+### Built-in Types
+
+**Primitives:**
+| Type | Description |
+|------|-------------|
+| `bool` | `true` or `false` |
+| `int` | 64-bit signed integer (overflow is a runtime error) |
+| `bigint` | Arbitrary precision integer |
+| `float` | 64-bit IEEE 754 floating point |
+| `decimal(p, s)` | Exact decimal with precision `p` and scale `s` (for money) |
+| `string` | Immutable UTF-8 text |
+| `bytes` | Immutable byte sequence (for binary data, I/O, networking) |
+
+**Collections:**
+| Type | Description |
+|------|-------------|
+| `Array<T>` | Immutable indexed collection |
+| `Map<K, V>` | Immutable key-value collection |
+| `Set<T>` | Immutable unique collection |
+
+**Compound:**
+| Type | Description |
+|------|-------------|
+| `{ ... }` | Record - bag of key-value pairs |
+| `(T, U, V)` | Tuple - fixed-size, positional |
+| `Option<T>` | `Some(value)` or `None` - no null! |
+
+```typescript
+// Primitives
+const count: int = 42;
+const price: decimal(10, 2) = 19.99;
+const name: string = "alice";
+
+// Collections (immutable - methods return new collections)
+const nums: Array<int> = [1, 2, 3];
+const updated = nums.push(4);  // [1, 2, 3, 4] - new array
+
+// Tuples - great for multiple returns
+function divmod(a: int, b: int): (int, int) {
+  return (a / b, a % b);
+}
+const (quotient, remainder) = divmod(10, 3);
+
+// Option instead of null
+function find(id: string): Option<User> {
+  // return Some(user) or None
+}
+
+match(find("123"), {
+  { :Some, value }: () => console.log(value.name),
+  { :None }: () => console.log("not found"),
+});
+```
+
 ### Types, not classes
 No `class` keyword. Just `type` for data and `function` for behavior. Keeps things simple and functional.
 
 ```typescript
 // Yes
-type User = { name: string; age: number };
-function createUser(name: string, age: number): User { ... }
+type User = { name: string; age: int };
+function createUser(name: string, age: int): User { ... }
 
 // No classes
 class User { constructor(...) { ... } }
