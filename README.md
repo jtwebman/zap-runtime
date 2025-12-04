@@ -44,13 +44,18 @@ type UserLeft = { userId: UserId };
 type NewMessage = { userId: UserId; username: string; content: string };
 type UserList = { users: Array<{ userId: UserId; username: string }> };
 
+// Error types
+type NotFoundError = { error: "NotFound"; message: string };
+type NotAuthorizedError = { error: "NotAuthorized"; message: string };
+
 // Protocol defines message -> response mapping
 // void = fire and forget (cast), type = expects response (call)
 type ChatRoomProtocol = {
-  Join: void;              // cast - no response, broadcasts to others
-  Leave: void;             // cast - no response
-  Message: void;           // cast - no response, broadcasts to others
-  GetUsers: UserList;      // call - returns list of users
+  Join: void;                                  // cast - no response
+  Leave: void;                                 // cast - no response
+  Message: void;                               // cast - no response
+  GetUsers: UserList | NotAuthorizedError;     // call - returns users or error
+  GetUser: UserInfo | NotFoundError;           // call - returns user or not found
 };
 
 // Actor is defined purely by its protocol type
