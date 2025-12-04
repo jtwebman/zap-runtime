@@ -123,9 +123,9 @@ const count: int = 42;
 const price: decimal(10, 2) = 19.99;
 const name: string = "alice";
 
-// Collections (immutable - methods return new collections)
+// Collections (immutable with structural sharing)
 const nums: Array<int> = [1, 2, 3];
-const updated = nums.push(4);  // [1, 2, 3, 4] - new array
+const updated = nums.push(4);  // [1, 2, 3, 4] - shares structure with nums
 
 // Tuples - great for multiple returns
 function divmod(a: int, b: int): (int, int) {
@@ -267,14 +267,29 @@ match (exit) {
 No magic crashes - memory allocation and spawning return `Error<T>` types that must be handled explicitly. Linking is for coordinated lifecycle management, not crash recovery.
 
 ### Immutable data structures
-Immutable `Map`, `Set`, `Array` from the collections library:
+Immutable `Map`, `Set`, `Array` from the collections library with structural sharing (efficient):
 
 ```typescript
 import { Map } from "collections";
 
 const users = Map.empty<string, User>();
-const updated = users.set("alice", user);  // returns new Map
-const removed = updated.delete("alice");   // returns new Map
+const updated = users.set("alice", user);  // shares structure with users
+const removed = updated.delete("alice");   // shares structure with updated
+```
+
+For building large collections in loops, use builders:
+
+```typescript
+import { ArrayBuilder, MapBuilder } from "collections";
+
+// Building large arrays efficiently
+let builder = ArrayBuilder.new<int>();
+let i = 0;
+while (i < 10000) {
+  builder.push(i);
+  i = i + 1;
+}
+const bigArray = builder.build();  // one allocation at the end
 ```
 
 ### Explicit error handling
