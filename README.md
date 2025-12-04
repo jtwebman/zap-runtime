@@ -33,23 +33,23 @@ But we want:
 ## Example
 
 ```typescript
-// Define message types with interfaces
-interface JoinMsg {
+// Define message types - just use 'type', no 'interface' confusion
+type JoinMsg = {
   type: "Join";
   userId: UserId;
   username: string;
-}
+};
 
-interface LeaveMsg {
+type LeaveMsg = {
   type: "Leave";
   userId: UserId;
-}
+};
 
-interface ChatMsg {
+type ChatMsg = {
   type: "Message";
   userId: UserId;
   content: string;
-}
+};
 
 // Union type for all messages this actor receives
 type ChatRoomReceives = JoinMsg | LeaveMsg | ChatMsg;
@@ -69,10 +69,10 @@ room.send({ type: "Message", userId: id, content: "Hello!" });
 
 room.send({ type: "Invalid" }); // COMPILE ERROR: 'Invalid' is not a valid message type
 
-// Actor state as an interface
-interface ChatRoomState {
+// Actor state
+type ChatRoomState = {
   users: Record<UserId, { username: string }>;
-}
+};
 
 // Handle messages - pure functional, no classes
 function chatRoom(ctx: Context<ChatRoom>, state: ChatRoomState = { users: {} }) {
