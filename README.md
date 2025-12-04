@@ -34,28 +34,28 @@ But we want:
 
 ```typescript
 // Define message and response types
-type JoinMsg = { userId: UserId; username: string };
-type LeaveMsg = { userId: UserId };
-type ChatMsg = { userId: UserId; content: string };
-type GetUsersMsg = { };
+// :TypeName is sugar for __type: "TypeName"
+type JoinMsg = { :JoinMsg; userId: UserId; username: string };
+type LeaveMsg = { :LeaveMsg; userId: UserId };
+type ChatMsg = { :ChatMsg; userId: UserId; content: string };
+type GetUsersMsg = { :GetUsersMsg };
 
-type UserJoined = { userId: UserId; username: string };
-type UserLeft = { userId: UserId };
-type NewMessage = { userId: UserId; username: string; content: string };
-type UserList = { users: Array<{ userId: UserId; username: string }> };
+type UserJoined = { :UserJoined; userId: UserId; username: string };
+type UserLeft = { :UserLeft; userId: UserId };
+type NewMessage = { :NewMessage; userId: UserId; username: string; content: string };
+type UserList = { :UserList; users: Array<{ userId: UserId; username: string }> };
 
 // Error types
-type NotFoundError = { error: "NotFound"; message: string };
-type NotAuthorizedError = { error: "NotAuthorized"; message: string };
+type NotFoundError = { :NotFoundError; message: string };
+type NotAuthorizedError = { :NotAuthorizedError; message: string };
 
 // Protocol defines message -> response mapping
 // void = fire and forget (cast), type = expects response (call)
 type ChatRoomProtocol = {
-  Join: void;                                  // cast - no response
-  Leave: void;                                 // cast - no response
-  Message: void;                               // cast - no response
-  GetUsers: UserList | NotAuthorizedError;     // call - returns users or error
-  GetUser: UserInfo | NotFoundError;           // call - returns user or not found
+  JoinMsg: void;                                   // cast - no response
+  LeaveMsg: void;                                  // cast - no response
+  ChatMsg: void;                                   // cast - no response
+  GetUsersMsg: UserList | NotAuthorizedError;      // call - returns users or error
 };
 
 // Actor is defined purely by its protocol type
@@ -65,13 +65,13 @@ const ChatRoom = actor<ChatRoomProtocol>();
 const room = spawn(ChatRoom);
 
 // Fire and forget (cast) - returns immediately
-room.cast("Join", { userId: id, username: "alice" });
-room.cast("Message", { userId: id, content: "Hello!" });
+room.cast({ :JoinMsg, userId: id, username: "alice" });
+room.cast({ :ChatMsg, userId: id, content: "Hello!" });
 
 // Request/reply (call) - waits for response, fully typed
-const users = room.call("GetUsers", {});  // type: UserList
+const result = room.call({ :GetUsersMsg });  // type: UserList | NotAuthorizedError
 
-room.cast("Invalid", {}); // COMPILE ERROR: 'Invalid' is not in ChatRoomProtocol
+room.cast({ :Invalid }); // COMPILE ERROR: Invalid is not in ChatRoomProtocol
 
 // Actor state
 type ChatRoomState = {
@@ -82,25 +82,26 @@ type ChatRoomState = {
 function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users: {} }) {
   const msg = receive(ctx);
 
+  // :TypeName is sugar for __type: "TypeName"
   match(msg, {
-    { type: "Join", userId, username }: () => {
-      broadcast(ctx, { type: "UserJoined", userId, username });
+    { :JoinMsg, userId, username }: () => {
+      broadcast(ctx, { :UserJoined, userId, username });
       return chatRoom(ctx, { ...state, users: { ...state.users, [userId]: { username } } });
     },
-    { type: "Message", userId, content }: () => {
+    { :ChatMsg, userId, content }: () => {
       const user = state.users[userId];
       if (user) {
-        broadcast(ctx, { type: "NewMessage", userId, username: user.username, content });
+        broadcast(ctx, { :NewMessage, userId, username: user.username, content });
       }
       return chatRoom(ctx, state);
     },
-    { type: "Leave", userId }: () => {
+    { :LeaveMsg, userId }: () => {
       const { [userId]: _, ...users } = state.users;
-      broadcast(ctx, { type: "UserLeft", userId });
+      broadcast(ctx, { :UserLeft, userId });
       return chatRoom(ctx, { ...state, users });
     },
-    { type: "GetUsers" }: () => {
-      reply(ctx, { users: Object.entries(state.users).map(([id, u]) => ({ userId: id, ...u })) });
+    { :GetUsersMsg }: () => {
+      reply(ctx, { :UserList, users: Object.entries(state.users).map(([id, u]) => ({ userId: id, ...u })) });
       return chatRoom(ctx, state);
     },
   });
