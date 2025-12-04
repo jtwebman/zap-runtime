@@ -18,7 +18,8 @@ But we want:
 - **Static types** - Catch errors at compile time, not in production at 3am
 - **Typed protocols** - Know exactly what messages an actor accepts
 - **C-style syntax** - Familiar to most developers (not ML-style)
-- **Per-process versioning** - Different processes can use different library versions
+- **Single-file deployment** - Compile to one bundled executable
+- **Signed packages** - Code signing for secure distribution
 - **Predictable latency** - AOT compiled, no JIT pauses
 
 ## Key Differentiators
@@ -28,9 +29,9 @@ But we want:
 | Type system      | Dynamic                     | Fully static, compile-time verified       |
 | Message types    | Any term                    | Typed protocols, verified at compile time |
 | Error handling   | Exceptions + "let it crash" | Error unions, explicit propagation        |
-| Module versions  | 2 (current + old)           | Unlimited, per-process binding            |
+| Deployment       | Release packages            | Single bundled executable (.zpc)          |
+| Package security | Trust-based                 | Code signing with verification            |
 | JIT pauses       | Yes (with JIT)              | No - AOT compiled                         |
-| Hot code loading | Global swap                 | Per-process version selection             |
 
 ## Example
 
@@ -263,6 +264,48 @@ user.cast({ :NewMessage, ... });  // OK - NewMessage is in UserProtocol
 user.cast({ :JoinMsg, ... });     // COMPILE ERROR - JoinMsg not in UserProtocol
 ```
 
+### Process lifecycle and linking
+
+Actors define both their protocol and exit reasons:
+
+```typescript
+// Default: only Normal exit (handle all errors internally)
+const Worker = actor<WorkerProtocol>();
+// Equivalent to: actor<WorkerProtocol, { :Normal }>
+
+// Custom exit reasons for coordinated shutdown
+type ChatRoomExit =
+  | { :Normal }
+  | { :Shutdown, reason: string }
+  | { :RoomExpired, roomId: string };
+
+const ChatRoom = actor<ChatRoomProtocol, ChatRoomExit>();
+```
+
+Link to a process to receive its exit notification:
+
+```typescript
+const room = spawn(ChatRoom, { link: self() });
+
+// Tell it to shut down
+room.cast({ :Shutdown });
+
+// Parent receives typed exit
+type RoomExited = Exited<ChatRoom>;  // derives from ChatRoomExit
+
+match(msg, {
+  { :RoomExited, id, reason }: () => {
+    match(reason, {
+      { :Normal }: () => log("room closed"),
+      { :Shutdown, reason }: () => log("room shut down: " + reason),
+      { :RoomExpired, roomId }: () => archiveRoom(roomId),
+    });
+  }
+});
+```
+
+No magic crashes - memory allocation and spawning return `Error<T>` types that must be handled explicitly. Linking is for coordinated lifecycle management, not crash recovery.
+
 ### Immutable data structures
 Built-in immutable `Map`, `Set`, `List` with functional update methods:
 
@@ -273,9 +316,13 @@ const removed = updated.delete("alice");   // returns new Map
 ```
 
 ### Explicit error handling
-No exceptions. Use union types for errors:
+No exceptions. Use union types for errors. Wrap error types in `Error<T>` to distinguish them from success types:
 
 ```typescript
+// Define error types with Error<T> wrapper
+type NotFoundError = Error<{ message: string }>;
+type NotAuthorizedError = Error<{ message: string }>;
+
 type Result = Data | NotFoundError | NotAuthorizedError;
 
 match(result, {
@@ -284,6 +331,27 @@ match(result, {
   { :NotAuthorizedError, message }: () => deny(),
 });
 ```
+
+Use `try` for early return on errors (like Zig). Only `Error<T>` types propagate:
+
+```typescript
+type NotFoundError = Error<{ id: string }>;
+type DbError = Error<{ code: int }>;
+
+function getProfile(id: string): Profile | NotFoundError | DbError {
+  const user = try getUser(id);        // returns early if Error<T>
+  const prefs = try getPrefs(user.id); // returns early if Error<T>
+  return { user, prefs };
+}
+
+// Multiple success types work fine - only Error<T> propagates
+function parse(input: string): User | Guest | ParseError {
+  // User and Guest are both valid returns
+  // only ParseError (an Error<T>) propagates with try
+}
+```
+
+The compiler enforces that all errors are handled at process boundaries - no unhandled errors can escape an actor's entry point.
 
 ## Roadmap
 
@@ -300,11 +368,12 @@ match(result, {
 - [ ] Type-safe message serialization
 - [ ] Error union integration
 
-### Phase 3: Per-Process Versioning
+### Phase 3: Build Artifacts & Packages
 
-- [ ] Module registry with versions
-- [ ] Per-process code bindings
-- [ ] Hot loading without affecting running processes
+- [ ] Single-file executable (.zpc) with bundled deps
+- [ ] Library package format (.zpl)
+- [ ] Code signing and verification
+- [ ] `zap.toml` manifest and lock files
 
 ### Phase 4: Bytecode & Language
 
@@ -348,6 +417,32 @@ const users = await room.getUsers();  // Promise<UserList>
 | `Set<T>` | `Set<T>` |
 | `(T, U)` | `[T, U]` |
 | `T?` | `T \| null` |
+
+## Standard Library
+
+**Keywords (not functions):**
+- `const`, `let`, `type`, `function`, `match`, `try`, `return`, `if`, `else`, `for`, `while`
+
+**Built-in types (no import):**
+- Primitives: `bool`, `int`, `bigint`, `float`, `decimal`, `string`, `bytes`
+- Collections: `Array<T>`, `Map<K,V>`, `Set<T>`
+- Core: `Error<T>`
+
+**Everything else is imported:**
+```typescript
+import { spawn, cast, call, self, receive, link } from "actor"
+import { print, panic } from "io"
+import { read, write } from "fs"
+import { listen, connect } from "net"
+import { get, post } from "http"
+import { now, sleep } from "time"
+import { encode, decode } from "json"
+import { hash, verify } from "crypto"
+import { format } from "fmt"
+import { env, args } from "os"
+```
+
+This makes every capability explicit - AI tools can learn the module catalog and the pattern is always the same.
 
 ## Memory Model
 

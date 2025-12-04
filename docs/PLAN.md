@@ -6,24 +6,30 @@ Zap combines the best ideas from multiple paradigms:
 
 - **Erlang/BEAM**: Lightweight processes, message passing, fair scheduling, fault isolation
 - **Pony**: Compile-time verified message types, no data races by construction
-- **npm/Node.js**: Per-process dependency versioning, multiple library versions coexisting
 - **Zig**: Zero-cost abstractions via comptime, explicit error handling, no hidden control flow
+
+Modern deployment (Kubernetes, blue-green deploys, rolling updates) handles what BEAM's hot code loading solved. Zap focuses on compile-time safety and simple deployment instead.
 
 ## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                           Zap Runtime                               │
+│                         Build Pipeline                              │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Source (.zap)                                                      │
+│  Source (.zap) + zap.toml                                           │
 │       ↓                                                             │
-│  Compiler (type checking via Zig comptime)                          │
+│  Compiler (type checking, dependency resolution)                    │
 │       ↓                                                             │
-│  Typed Bytecode (.zpc) ─────→ Module Registry (versioned)           │
-│       ↓                              ↓                              │
-│  AOT Native Compiler          Code Cache (per-version)              │
-│       ↓                              ↓                              │
-│  Native Code + Yield Points ←───────┘                               │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Executable (.zpc)          OR      Library (.zpl)          │   │
+│  │  - All deps bundled                 - Bytecode + types      │   │
+│  │  - Single file deployment           - Signed for security   │   │
+│  │  - Run directly                     - Publishable           │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                           Zap Runtime                               │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Process Layer                                                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │
@@ -33,8 +39,6 @@ Zap combines the best ideas from multiple paradigms:
 │  │ (typed)     │  │ (typed)     │  │ (typed)     │                 │
 │  │ Heap        │  │ Heap        │  │ Heap        │                 │
 │  │ (arena)     │  │ (arena)     │  │ (arena)     │                 │
-│  │ CodeBindings│  │ CodeBindings│  │ CodeBindings│                 │
-│  │ {lib@1.0}   │  │ {lib@2.0}   │  │ {lib@1.0}   │                 │
 │  └─────────────┘  └─────────────┘  └─────────────┘                 │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Scheduler (reduction-based, fair, no starvation)                   │
@@ -85,18 +89,38 @@ src/
 
 **Key Innovation:** This is where Zap differentiates from Gleam. If typed protocols feel natural and catch real errors, we have something unique.
 
-### Phase 3: Per-Process Versioning
+### Phase 3: Build Artifacts & Package System
 
-**Goal:** Prove our most novel idea works
+**Goal:** Single-file deployment and secure package distribution
 
 **Deliverables:**
-- [ ] Module registry with version tracking
-- [ ] Per-process code bindings
-- [ ] Spawn with version requirements
-- [ ] Hot load new versions (existing processes unaffected)
-- [ ] Demo: Two processes using different versions of same library
+- [ ] Executable artifact (.zpc) - all deps bundled into one file
+- [ ] Library artifact (.zpl) - publishable package format
+- [ ] `zap.toml` manifest with dependency declarations
+- [ ] Lock file for reproducible builds
+- [ ] Code signing for libraries
+- [ ] Signature verification during build
 
-**This is the killer feature.** If it works well, it's a compelling story for adoption.
+**Artifact Types:**
+```bash
+zap build              # outputs {name}.zpc from zap.toml
+zap pack               # outputs {name}-{version}.zpl (signed)
+zap run app.zpc        # run executable
+```
+
+**Manifest Example:**
+```toml
+[package]
+name = "myapp"
+version = "1.0.0"
+main = "src/main.zap"
+
+[dependencies]
+json = { version = "2.0.0", source = "github:zap-lang/json" }
+http = { version = "1.5.0", source = "github:zap-lang/http" }
+```
+
+Libraries can have their own dependencies with different versions - resolved at compile time, not runtime.
 
 ### Phase 4: Simple Bytecode
 
@@ -127,7 +151,7 @@ src/
 - [ ] Full language syntax design
 - [ ] Compiler frontend
 - [ ] Standard library
-- [ ] Package manager
+- [ ] Package manager (fetch from GitHub releases, verify signatures)
 - [ ] LSP server
 - [ ] Documentation
 
@@ -197,7 +221,8 @@ src/
 
 **Zap's Unique Position:**
 - C-style syntax (vs Gleam's ML-style)
-- Per-process versioning (novel)
+- Single-file deployment with bundled deps
+- Signed packages for security
 - Full AOT, no JIT pauses
 - Not dependent on BEAM or WASM
 
@@ -228,7 +253,6 @@ const Process = struct {
     id: ProcessId,
     mailbox: TypedMailbox,
     heap: ArenaAllocator,
-    code_bindings: CodeBindings,
     reductions_remaining: u32,
     state: enum { ready, running, blocked, dead },
 };
