@@ -332,7 +332,22 @@ const users = await room.getUsers();  // Promise<UserList>
 - [ ] Functions → Functions
 - [ ] Types → TypeScript definitions (.d.ts)
 - [ ] Pattern matching → switch/if-else
-- [ ] Immutable collections → Native JS (or Immer)
+
+**Type mapping to JavaScript:**
+| Zap | JavaScript |
+|-----|------------|
+| `bool` | `boolean` |
+| `int` | `number` (trust developer for precision) |
+| `bigint` | `BigInt` |
+| `float` | `number` |
+| `decimal` | TBD (decimal.js or custom) |
+| `string` | `string` |
+| `bytes` | `Uint8Array` |
+| `Array<T>` | `Array<T>` |
+| `Map<K,V>` | `Map<K,V>` |
+| `Set<T>` | `Set<T>` |
+| `(T, U)` | `[T, U]` |
+| `T?` | `T \| null` |
 
 ## Memory Model
 
