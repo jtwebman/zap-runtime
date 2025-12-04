@@ -425,4 +425,6 @@ Open an issue or reach out!
 
 ## License
 
-MIT OR Apache-2.0 (dual-licensed)
+MIT
+
+By contributing to Zap, you agree that your contributions will be licensed under the MIT license.
