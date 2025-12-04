@@ -337,7 +337,7 @@ const users = await room.getUsers();  // Promise<UserList>
 | Zap | JavaScript |
 |-----|------------|
 | `bool` | `boolean` |
-| `int` | `number` (trust developer for precision) |
+| `int` | `number` (with overflow check → error) |
 | `bigint` | `BigInt` |
 | `float` | `number` |
 | `decimal` | TBD (decimal.js or custom) |
