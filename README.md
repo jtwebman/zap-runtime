@@ -341,6 +341,7 @@ Zap uses **per-process garbage collection** inspired by BEAM:
 - Small heaps = fast GC (microseconds)
 - Process isolation = independent GC scheduling
 - Short-lived processes may never GC at all
+- **GC yields like everything else** - even a large collection uses the same reduction-based scheduling, so it never blocks other processes
 
 **Message passing:**
 ```typescript
