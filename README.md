@@ -33,56 +33,55 @@ But we want:
 ## Example
 
 ```typescript
-// Define message types - just use 'type', no 'interface' confusion
-type JoinMsg = {
-  type: "Join";
-  userId: UserId;
-  username: string;
+// Define message and response types
+type JoinMsg = { userId: UserId; username: string };
+type LeaveMsg = { userId: UserId };
+type ChatMsg = { userId: UserId; content: string };
+type GetUsersMsg = { };
+
+type UserJoined = { userId: UserId; username: string };
+type UserLeft = { userId: UserId };
+type NewMessage = { userId: UserId; username: string; content: string };
+type UserList = { users: Array<{ userId: UserId; username: string }> };
+
+// Protocol defines message -> response mapping
+// void = fire and forget (cast), type = expects response (call)
+type ChatRoomProtocol = {
+  Join: void;              // cast - no response, broadcasts to others
+  Leave: void;             // cast - no response
+  Message: void;           // cast - no response, broadcasts to others
+  GetUsers: UserList;      // call - returns list of users
 };
 
-type LeaveMsg = {
-  type: "Leave";
-  userId: UserId;
-};
-
-type ChatMsg = {
-  type: "Message";
-  userId: UserId;
-  content: string;
-};
-
-// Union type for all messages this actor receives
-type ChatRoomReceives = JoinMsg | LeaveMsg | ChatMsg;
-
-// Define the actor's protocol
-const ChatRoom = actor<ChatRoomReceives>({
-  receives: ["Join", "Leave", "Message"],
-  sends: ["UserJoined", "UserLeft", "NewMessage"],
-});
+// Actor is defined purely by its protocol type
+const ChatRoom = actor<ChatRoomProtocol>();
 
 // Spawn a new process
 const room = spawn(ChatRoom);
 
-// Type-safe message sending
-room.send({ type: "Join", userId: id, username: "alice" });
-room.send({ type: "Message", userId: id, content: "Hello!" });
+// Fire and forget (cast) - returns immediately
+room.cast("Join", { userId: id, username: "alice" });
+room.cast("Message", { userId: id, content: "Hello!" });
 
-room.send({ type: "Invalid" }); // COMPILE ERROR: 'Invalid' is not a valid message type
+// Request/reply (call) - waits for response, fully typed
+const users = room.call("GetUsers", {});  // type: UserList
+
+room.cast("Invalid", {}); // COMPILE ERROR: 'Invalid' is not in ChatRoomProtocol
 
 // Actor state
 type ChatRoomState = {
   users: Record<UserId, { username: string }>;
 };
 
-// Handle messages - pure functional, no classes
-function chatRoom(ctx: Context<ChatRoom>, state: ChatRoomState = { users: {} }) {
+// Handle messages - pure functional
+function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users: {} }) {
   const msg = receive(ctx);
 
   switch (msg.type) {
     case "Join": {
       const users = { ...state.users, [msg.userId]: { username: msg.username } };
       broadcast(ctx, { type: "UserJoined", userId: msg.userId, username: msg.username });
-      return chatRoom(ctx, { ...state, users }); // tail-recursive loop
+      return chatRoom(ctx, { ...state, users });
     }
     case "Message": {
       const user = state.users[msg.userId];
@@ -95,6 +94,11 @@ function chatRoom(ctx: Context<ChatRoom>, state: ChatRoomState = { users: {} }) 
       const { [msg.userId]: _, ...users } = state.users;
       broadcast(ctx, { type: "UserLeft", userId: msg.userId });
       return chatRoom(ctx, { ...state, users });
+    }
+    case "GetUsers": {
+      // reply() sends response back to caller
+      reply(ctx, { users: Object.entries(state.users).map(([id, u]) => ({ userId: id, ...u })) });
+      return chatRoom(ctx, state);
     }
   }
 }
