@@ -7,12 +7,14 @@ A BEAM-inspired runtime written in Zig with static typing, predictable latency, 
 ## Why Zap?
 
 We love what Erlang/BEAM gives us:
+
 - Lightweight processes (millions of them)
 - Fair scheduling (no process starves)
 - Fault isolation (one crash doesn't take down the system)
 - Message passing (no shared mutable state)
 
 But we want:
+
 - **Static types** - Catch errors at compile time, not in production at 3am
 - **Typed protocols** - Know exactly what messages an actor accepts
 - **C-style syntax** - Familiar to most developers (not ML-style)
@@ -21,98 +23,98 @@ But we want:
 
 ## Key Differentiators
 
-| Feature | BEAM | Zap |
-|---------|------|-----|
-| Type system | Dynamic | Fully static, compile-time verified |
-| Message types | Any term | Typed protocols, verified at compile time |
-| Error handling | Exceptions + "let it crash" | Error unions, explicit propagation |
-| Module versions | 2 (current + old) | Unlimited, per-process binding |
-| JIT pauses | Yes (with JIT) | No - AOT compiled |
-| Hot code loading | Global swap | Per-process version selection |
+| Feature          | BEAM                        | Zap                                       |
+| ---------------- | --------------------------- | ----------------------------------------- |
+| Type system      | Dynamic                     | Fully static, compile-time verified       |
+| Message types    | Any term                    | Typed protocols, verified at compile time |
+| Error handling   | Exceptions + "let it crash" | Error unions, explicit propagation        |
+| Module versions  | 2 (current + old)           | Unlimited, per-process binding            |
+| JIT pauses       | Yes (with JIT)              | No - AOT compiled                         |
+| Hot code loading | Global swap                 | Per-process version selection             |
 
 ## Example
 
 ```typescript
 // Define message and response types
 // 'type' keyword automatically adds __type field from the type name
-type JoinMsg = { userId: UserId; username: string };
-type LeaveMsg = { userId: UserId };
-type ChatMsg = { userId: UserId; content: string };
-type GetUsersMsg = {};
 
-type UserJoined = { userId: UserId; username: string };
-type UserLeft = { userId: UserId };
-type NewMessage = { userId: UserId; username: string; content: string };
-type UserList = { users: Array<{ userId: UserId; username: string }> };
+// Messages the User actor receives
+type GetUsername = {};
+type UserJoined = { username: string };
+type UserLeft = { username: string };
+type NewMessage = { username: string; content: string };
 
-// Error types
-type NotFoundError = { message: string };
-type NotAuthorizedError = { message: string };
+// Messages the ChatRoom actor receives
+type JoinMsg = { username: string; process: User };
+type LeaveMsg = { username: string };
+type ChatMsg = { username: string; content: string };
 
-// Protocol defines message -> response mapping
-// void = fire and forget (cast), type = expects response (call)
-type ChatRoomProtocol = {
-  JoinMsg: void;                                   // cast - no response
-  LeaveMsg: void;                                  // cast - no response
-  ChatMsg: void;                                   // cast - no response
-  GetUsersMsg: UserList | NotAuthorizedError;      // call - returns users or error
-};
+// Protocol = union of Cast<Msg> and Call<Msg, Response>
+// Cast = fire and forget, Call = request/response
+type UserProtocol =
+  | Cast<UserJoined>
+  | Cast<UserLeft>
+  | Cast<NewMessage>
+  | Call<GetUsername, string>;
 
-// Actor is defined purely by its protocol type
+type ChatRoomProtocol =
+  | Cast<JoinMsg>
+  | Cast<LeaveMsg>
+  | Cast<ChatMsg>;
+
+// Define actors by their protocol
+const User = actor<UserProtocol>();
 const ChatRoom = actor<ChatRoomProtocol>();
 
-// Spawn a new process
+// Spawn processes
 const room = spawn(ChatRoom);
+const me = spawn(User);
 
-// Fire and forget (cast) - returns immediately
-room.cast({ :JoinMsg, userId: id, username: "alice" });
-room.cast({ :ChatMsg, userId: id, content: "Hello!" });
+// Call waits for response (typed!)
+const myUsername = me.call({ :GetUsername });  // type: string
 
-// Request/reply (call) - waits for response, fully typed
-const result = room.call({ :GetUsersMsg });  // type: UserList | NotAuthorizedError
+// Cast fires and forgets
+room.cast({ :JoinMsg, username: myUsername, process: me });
+room.cast({ :ChatMsg, username: myUsername, content: "Hello!" });
 
 room.cast({ :Invalid }); // COMPILE ERROR: Invalid is not in ChatRoomProtocol
 
-// Actor state - includes subscriber PIDs
+// Actor state
 type ChatRoomState = {
-  users: Record<UserId, { username: string; pid: Pid }>;
+  users: Map<string, { process: User }>;
 };
 
 // Handle messages - pure functional with pattern matching
-function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users: {} }) {
+function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users: Map.empty() }) {
   const msg = receive(ctx);
 
   // :TypeName is sugar for __type: "TypeName"
   match(msg, {
-    { :JoinMsg, userId, username, pid }: () => {
-      // Send to each existing user
-      Object.values(state.users).forEach(user =>
-        cast(user.pid, { :UserJoined, userId, username })
+    { :JoinMsg, username, process }: () => {
+      // Notify existing users
+      state.users.forEach((user) =>
+        user.process.cast({ :UserJoined, username })
       );
-      return chatRoom(ctx, { ...state, users: { ...state.users, [userId]: { username, pid } } });
+      return { ...state, users: state.users.set(username, { process }) };
     },
-    { :ChatMsg, userId, content }: () => {
-      const sender = state.users[userId];
-      if (sender) {
-        // Send to all users
-        Object.values(state.users).forEach(user =>
-          cast(user.pid, { :NewMessage, userId, username: sender.username, content })
-        );
-      }
-      return chatRoom(ctx, state);
+
+    { :ChatMsg, username, content }: () => {
+      // Send to all other users
+      state.users.forEach((user, key) => {
+        if (key !== username) {
+          user.process.cast({ :NewMessage, username, content });
+        }
+      });
+      return state;
     },
-    { :LeaveMsg, userId }: () => {
-      const { [userId]: _, ...users } = state.users;
+
+    { :LeaveMsg, username }: () => {
+      const users = state.users.delete(username);
       // Notify remaining users
-      Object.values(users).forEach(user =>
-        cast(user.pid, { :UserLeft, userId })
+      users.forEach((user) =>
+        user.process.cast({ :UserLeft, username })
       );
-      return chatRoom(ctx, { ...state, users });
-    },
-    { :GetUsersMsg, replyTo }: () => {
-      // Explicit reply to caller
-      cast(replyTo, { :UserList, users: Object.entries(state.users).map(([id, u]) => ({ userId: id, ...u })) });
-      return chatRoom(ctx, state);
+      return { ...state, users };
     },
   });
 }
@@ -121,22 +123,26 @@ function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users
 ## Roadmap
 
 ### Phase 1: Core Runtime (In Progress)
+
 - [ ] Process scheduler with reduction-based preemption
 - [ ] Typed mailboxes and message passing
 - [ ] Basic I/O (TCP, files)
 - [ ] Run 10,000+ processes
 
 ### Phase 2: Type System
+
 - [ ] Compile-time protocol verification
 - [ ] Type-safe message serialization
 - [ ] Error union integration
 
 ### Phase 3: Per-Process Versioning
+
 - [ ] Module registry with versions
 - [ ] Per-process code bindings
 - [ ] Hot loading without affecting running processes
 
 ### Phase 4: Bytecode & Language
+
 - [ ] Bytecode instruction set
 - [ ] Interpreter
 - [ ] Simple compiler frontend
@@ -151,6 +157,7 @@ function chatRoom(ctx: Context<ChatRoomProtocol>, state: ChatRoomState = { users
 ## Prior Art & Inspiration
 
 Zap builds on ideas from:
+
 - **[BEAM/Erlang](https://www.erlang.org/)** - The gold standard for actor-based concurrency
 - **[Pony](https://www.ponylang.io/)** - Compile-time verified message types
 - **[Gleam](https://gleam.run/)** - Proving there's demand for typed BEAM
@@ -159,11 +166,13 @@ Zap builds on ideas from:
 ## Building in Public
 
 I'm documenting the entire journey of building Zap:
+
 - **Twitter:** [@jtwebman](https://x.com/jtwebman)
 
 ## Contributing
 
 Zap is in early development. If you're interested in:
+
 - VM/runtime design
 - Type system implementation
 - Zig programming
