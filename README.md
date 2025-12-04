@@ -40,11 +40,11 @@ import { Map } from "collections";
 import { spawn } from "actor";
 
 // Tagged union for messages
-// Variants with => return a response, others are fire-and-forget
+// All variants declare their return type
 type ChatRoomMsg =
-  | Join { username: string }
-  | Leave { username: string }
-  | Chat { username: string, content: string }
+  | Join { username: string } => void
+  | Leave { username: string } => void
+  | Chat { username: string, content: string } => void
   | GetUsers {} => Array<string>;
 
 // Actor state
@@ -52,22 +52,13 @@ type ChatRoomState = {
   users: Map<string, bool>,
 };
 
-// Pure handler function - runtime handles the message loop
-function chatRoomHandler(state: ChatRoomState, msg: ChatRoomMsg): ChatRoomState {
+// Pure handler function - returns (newState, response) tuple
+function chatRoomHandler(state: ChatRoomState, msg: ChatRoomMsg): (ChatRoomState, void | Array<string>) {
   match (msg) {
-    Join { username } => {
-      return { ...state, users: state.users.set(username, true) };
-    },
-    Chat { username, content } => {
-      // Handle chat message
-      return state;
-    },
-    Leave { username } => {
-      return { ...state, users: state.users.delete(username) };
-    },
-    GetUsers {} => {
-      return state.users.keys();
-    },
+    Join { username } => ({ ...state, users: state.users.set(username, true) }, {}),
+    Chat { username, content } => (state, {}),
+    Leave { username } => ({ ...state, users: state.users.delete(username) }, {}),
+    GetUsers {} => (state, state.users.keys()),
   }
 }
 
@@ -79,12 +70,12 @@ function initChatRoom(): ChatRoomState {
 // Spawn the actor
 const room = spawn(chatRoomHandler, initChatRoom);
 
-// Fire and forget (no => in type)
+// send() - fire and forget, continues immediately
 room.send(Join { username: "alice" });
 room.send(Chat { username: "alice", content: "Hello!" });
 
-// Request/response (has => in type, returns Array<string>)
-const users = room.send(GetUsers {});
+// call() - wait for response
+const users = room.call(GetUsers {});  // returns Array<string>
 
 // COMPILE ERROR: Invalid is not in ChatRoomMsg
 room.send(Invalid { data: 123 });
@@ -189,14 +180,20 @@ type Option<T> =
   | None {};
 ```
 
-For actor messages, use `=>` to indicate variants that return a response:
+For actor messages, all variants declare their return type with `=>`:
 
 ```typescript
 type ChatMsg =
-  | Join { username: string }              // fire and forget
-  | Leave { username: string }             // fire and forget
+  | Join { username: string } => void      // returns void
+  | Leave { username: string } => void     // returns void
   | GetUsers {} => Array<string>           // returns Array<string>
   | GetUser { id: string } => User?;       // returns User?
+
+// send() - fire and forget
+room.send(Join { username: "alice" });
+
+// call() - wait for response
+const users = room.call(GetUsers {});
 ```
 
 ### Pattern Matching
@@ -230,12 +227,13 @@ match (msg) {
 ```
 
 ### Typed process references
-Spawned processes are typed by their message type. You can only send messages they accept.
+Spawned processes are typed by their message type. You can only send/call messages they accept.
 
 ```typescript
 const room = spawn(chatRoomHandler, initChatRoom);
-room.send(Join { username: "alice" });  // OK - Join is in ChatRoomMsg
-room.send(Invalid { data: 123 });       // COMPILE ERROR - Invalid not in ChatRoomMsg
+room.send(Join { username: "alice" });     // OK - fire and forget
+const users = room.call(GetUsers {});      // OK - wait for response
+room.send(Invalid { data: 123 });          // COMPILE ERROR - Invalid not in ChatRoomMsg
 ```
 
 ### Process lifecycle and linking
@@ -482,19 +480,21 @@ Actors are pure functions. The runtime handles the message loop.
 ```typescript
 import { Map } from "collections";
 
-// Message type
+// Message type - all variants have => return type
 type ChatRoomMsg =
-  | Join { username: string, user: User }
-  | Leave { username: string };
+  | Join { username: string, user: User } => void
+  | Leave { username: string } => void
+  | GetUser { username: string } => User?;
 
 // State type
 type ChatRoomState = { users: Map<string, User> };
 
-// Pure handler function
-function chatRoomHandler(state: ChatRoomState, msg: ChatRoomMsg): ChatRoomState {
+// Pure handler function - returns (newState, response) tuple
+function chatRoomHandler(state: ChatRoomState, msg: ChatRoomMsg): (ChatRoomState, void | User?) {
   match (msg) {
-    Join { username, user } => { ...state, users: state.users.set(username, user) },
-    Leave { username } => { ...state, users: state.users.delete(username) },
+    Join { username, user } => ({ ...state, users: state.users.set(username, user) }, {}),
+    Leave { username } => ({ ...state, users: state.users.delete(username) }, {}),
+    GetUser { username } => (state, state.users.get(username)),
   }
 }
 
@@ -511,12 +511,16 @@ function termChatRoom(state: ChatRoomState): void {
 const room1 = spawn(chatRoomHandler, initChatRoom, termChatRoom);
 const room2 = spawn(chatRoomHandler, initChatRoom);              // no terminate
 const room3 = spawn(chatRoomHandler, { users: Map.empty() });    // direct state
+
+// send() = fire and forget, call() = wait for response
+room1.send(Join { username: "alice", user: alice });
+const user = room1.call(GetUser { username: "alice" });
 ```
 
 **Spawn signature:**
 ```typescript
 spawn<S, M>(
-  handler: (state: S, msg: M) => S,
+  handler: (state: S, msg: M) => (S, Response),
   init: S | () => S,
   terminate?: (state: S) => void
 )
