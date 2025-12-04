@@ -16,7 +16,7 @@ We love what Erlang/BEAM gives us:
 But we want:
 
 - **Static types** - Catch errors at compile time, not in production at 3am
-- **Typed protocols** - Know exactly what messages an actor accepts
+- **Tagged unions** - Know exactly what messages an actor accepts
 - **C-style syntax** - Familiar to most developers (not ML-style)
 - **Single-file deployment** - Compile to one bundled executable
 - **Signed packages** - Code signing for secure distribution
@@ -27,8 +27,8 @@ But we want:
 | Feature          | BEAM                        | Zap                                       |
 | ---------------- | --------------------------- | ----------------------------------------- |
 | Type system      | Dynamic                     | Fully static, compile-time verified       |
-| Message types    | Any term                    | Typed protocols, verified at compile time |
-| Error handling   | Exceptions + "let it crash" | Error unions, explicit propagation        |
+| Message types    | Any term                    | Tagged unions, verified at compile time   |
+| Error handling   | Exceptions + "let it crash" | Tagged unions, explicit propagation       |
 | Deployment       | Release packages            | Single bundled executable (.zpc)          |
 | Package security | Trust-based                 | Code signing with verification            |
 | JIT pauses       | Yes (with JIT)              | No - AOT compiled                         |
@@ -117,7 +117,7 @@ const y = 10;
 |------|-------------|
 | `{ ... }` | Record - bag of key-value pairs |
 | `(T, U, V)` | Tuple - fixed-size, positional |
-| `T?` | Optional - `Some(value)` or `None` - no null! |
+| `T?` | Optional - `Some { value }` or `None {}` - no null! |
 
 ```typescript
 import { Array } from "collections";
@@ -368,8 +368,8 @@ await room.join({ username: "alice" });
 
 **Built-in types (no import):**
 - Primitives: `bool`, `int`, `bigint`, `float`, `decimal`, `string`, `bytes`
-- Structural: `{ }` records, `(T, U)` tuples
-- Special: `Error<T>`, `T?`
+- Structural: `{ }` records, `(T, U)` tuples, tagged unions
+- Special: `T?` (optional)
 
 **Everything else is imported:**
 ```typescript
@@ -668,7 +668,7 @@ Zap uses **per-process garbage collection** inspired by BEAM:
 **Message passing:**
 ```typescript
 // Messages are COPIED, not shared
-processA.cast({ :Data, value: largeObject });
+processA.send(Data { value: largeObject });
 // processA and processB each have their own copy
 // No shared references, no data races
 ```
