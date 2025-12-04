@@ -36,49 +36,38 @@ But we want:
 ## Example
 
 ```typescript
-import { Map } from "collections"
-import { spawn, cast, call, link } from "actor"
+import { Map } from "collections";
+import { spawn } from "actor";
 
-// Define message types
-// 'type' keyword automatically adds __type field from the type name
-type JoinMsg = { username: string };
-type LeaveMsg = { username: string };
-type ChatMsg = { username: string; content: string };
-type GetUsers = {};
-
-// Protocol = union of Cast<Msg> and Call<Msg, Response>
-// Cast = fire and forget, Call = request/response
-type ChatRoomProtocol =
-  | Cast<JoinMsg>
-  | Cast<LeaveMsg>
-  | Cast<ChatMsg>
-  | Call<GetUsers, Array<string>>;
+// Tagged union for messages
+type ChatRoomMsg =
+  | Join { username: string }
+  | Leave { username: string }
+  | Chat { username: string, content: string }
+  | GetUsers {};
 
 // Actor state
 type ChatRoomState = {
-  users: Map<string, bool>;
+  users: Map<string, bool>,
 };
 
 // Pure handler function - runtime handles the message loop
-function chatRoomHandler(state: ChatRoomState, msg: ChatRoomProtocol): ChatRoomState {
-  match(msg, {
-    { :JoinMsg, username }: () => {
+function chatRoomHandler(state: ChatRoomState, msg: ChatRoomMsg): ChatRoomState {
+  match (msg) {
+    Join { username } => {
       return { ...state, users: state.users.set(username, true) };
     },
-
-    { :ChatMsg, username, content }: () => {
+    Chat { username, content } => {
       // Handle chat message
       return state;
     },
-
-    { :LeaveMsg, username }: () => {
+    Leave { username } => {
       return { ...state, users: state.users.delete(username) };
     },
-
-    { :GetUsers }: () => {
+    GetUsers {} => {
       return state.users.keys();
     },
-  });
+  }
 }
 
 // Init function
@@ -89,17 +78,26 @@ function initChatRoom(): ChatRoomState {
 // Spawn the actor
 const room = spawn(chatRoomHandler, initChatRoom);
 
-// Cast fires and forgets
-room.cast({ :JoinMsg, username: "alice" });
-room.cast({ :ChatMsg, username: "alice", content: "Hello!" });
+// Send messages
+room.send(Join { username: "alice" });
+room.send(Chat { username: "alice", content: "Hello!" });
 
-// Call waits for response (typed!)
-const users = room.call({ :GetUsers });  // type: Array<string>
-
-room.cast({ :Invalid }); // COMPILE ERROR: Invalid is not in ChatRoomProtocol
+// COMPILE ERROR: Invalid is not in ChatRoomMsg
+room.send(Invalid { data: 123 });
 ```
 
 ## Language Design Choices
+
+### Syntax Basics
+
+**Semicolons required.** No automatic semicolon insertion:
+
+```typescript
+const x = 5;
+const y = 10;
+```
+
+**Whitespace is uniform.** Spaces, tabs, newlines are all equivalent - just separators. No significant indentation.
 
 ### Built-in Types
 
@@ -122,8 +120,8 @@ room.cast({ :Invalid }); // COMPILE ERROR: Invalid is not in ChatRoomProtocol
 | `T?` | Optional - `Some(value)` or `None` - no null! |
 
 ```typescript
-import { Array } from "collections"
-import { print } from "io"
+import { Array } from "collections";
+import { print } from "io";
 
 // Primitives
 const count: int = 42;
@@ -142,13 +140,13 @@ const (quotient, remainder) = divmod(10, 3);
 
 // Optional with ? instead of null
 function find(id: string): User? {
-  // return Some(user) or None
+  // return Some { value: user } or None {}
 }
 
-match(find("123"), {
-  { :Some, value }: () => print(value.name),
-  { :None }: () => print("not found"),
-});
+match (find("123")) {
+  Some { value } => print(value.name),
+  None {} => print("not found"),
+}
 ```
 
 ### Types, not classes
@@ -166,94 +164,76 @@ class User { constructor(...) { ... } }
 ### `type` only, no `interface`
 Unlike TypeScript, there's no `interface` vs `type` confusion. Just use `type` for everything.
 
-### Records and Types
-`{}` is a record - just a bag of key-value pairs. Pattern matching works on records directly.
+### Records
+`{}` is a record - just a bag of key-value pairs:
 
 ```typescript
 // A plain record
 const msg = { username: "alice", content: "hello" };
-
-// Pattern match on any record
-match(msg, {
-  { username, content }: () => print(`${username}: ${content}`),
-});
 ```
 
-`type` creates a named record that automatically includes a `__type` property. This is just sugar for easier pattern matching - under the hood, everything is records and pattern matching.
+### Tagged Unions
+Use tagged unions for types that can be one of several variants:
 
 ```typescript
-type JoinMsg = { username: string };
-// Equivalent to a record with: { __type: "JoinMsg", username: string }
+type Result =
+  | Success { value: int }
+  | Error { message: string };
 
-// So you can pattern match on the __type
-match(msg, {
-  { __type: "JoinMsg", username }: () => ...,
-  { __type: "LeaveMsg", username }: () => ...,
-});
+type Option<T> =
+  | Some { value: T }
+  | None {};
 ```
 
-### `:TypeName` syntax
-Shorthand for the `__type` field when creating values or pattern matching:
+### Pattern Matching
+`match` on tagged unions. Compiler ensures all cases are handled (exhaustive):
 
 ```typescript
-// Creating a value
-room.cast({ :JoinMsg, username: "alice" });
-// Equivalent to: { __type: "JoinMsg", username: "alice" }
+match (result) {
+  Success { value } => print(`Got: ${value}`),
+  Error { message } => print(`Failed: ${message}`),
+}
 
-// Pattern matching
-match(msg, {
-  { :JoinMsg, username }: () => { ... },
-  { :LeaveMsg, username }: () => { ... },
-});
+// COMPILE ERROR: missing case for Error
+match (result) {
+  Success { value } => print(value),
+}
 ```
 
-### Pattern matching on structure
-`match()` matches on actual structure, not type names. Destructuring is built-in.
+No nested pattern matching on field values - use `if`/`else` inside match arms:
 
 ```typescript
-match(value, {
-  { :Some, value }: () => print(value),
-  { :None }: () => print("nothing"),
-});
-```
-
-### Protocols with `Cast<T>` and `Call<T, R>`
-Actor protocols are unions of message types:
-- `Cast<Msg>` - fire and forget
-- `Call<Msg, Response>` - request/response (can include error types)
-
-```typescript
-type MyProtocol =
-  | Cast<PingMsg>
-  | Cast<NotifyMsg>
-  | Call<GetDataMsg, Data | NotFoundError>;
+match (msg) {
+  Join { username } => {
+    if (username == "admin") {
+      // special handling
+    } else {
+      // normal handling
+    }
+  },
+  Leave { username } => { ... },
+}
 ```
 
 ### Typed process references
-Spawned processes are typed by their protocol. You can only send messages they accept.
+Spawned processes are typed by their message type. You can only send messages they accept.
 
 ```typescript
 const room = spawn(chatRoomHandler, initChatRoom);
-room.cast({ :JoinMsg, username: "alice" });  // OK - JoinMsg is in ChatRoomProtocol
-room.cast({ :Invalid, data: 123 });          // COMPILE ERROR - Invalid not in ChatRoomProtocol
+room.send(Join { username: "alice" });  // OK - Join is in ChatRoomMsg
+room.send(Invalid { data: 123 });       // COMPILE ERROR - Invalid not in ChatRoomMsg
 ```
 
 ### Process lifecycle and linking
 
-Actors define both their protocol and exit reasons:
+Define exit reasons as a tagged union:
 
 ```typescript
-// Default: only Normal exit (handle all errors internally)
-const Worker = actor<WorkerProtocol>();
-// Equivalent to: actor<WorkerProtocol, { :Normal }>
-
 // Custom exit reasons for coordinated shutdown
 type ChatRoomExit =
-  | { :Normal }
-  | { :Shutdown, reason: string }
-  | { :RoomExpired, roomId: string };
-
-const ChatRoom = actor<ChatRoomProtocol, ChatRoomExit>();
+  | Normal {}
+  | Shutdown { reason: string }
+  | RoomExpired { roomId: string };
 ```
 
 Link to a process to receive its exit notification:
@@ -262,20 +242,14 @@ Link to a process to receive its exit notification:
 const room = spawn(chatRoomHandler, initChatRoom, { link: self() });
 
 // Tell it to shut down
-room.cast({ :Shutdown });
+room.send(Shutdown { reason: "closing" });
 
 // Parent receives typed exit
-type RoomExited = Exited<ChatRoom>;  // derives from ChatRoomExit
-
-match(msg, {
-  { :RoomExited, id, reason }: () => {
-    match(reason, {
-      { :Normal }: () => print("room closed"),
-      { :Shutdown, reason }: () => print(`room shut down: ${reason}`),
-      { :RoomExpired, roomId }: () => archiveRoom(roomId),
-    });
-  }
-});
+match (exit) {
+  Normal {} => print("room closed"),
+  Shutdown { reason } => print(`room shut down: ${reason}`),
+  RoomExpired { roomId } => archiveRoom(roomId),
+}
 ```
 
 No magic crashes - memory allocation and spawning return `Error<T>` types that must be handled explicitly. Linking is for coordinated lifecycle management, not crash recovery.
@@ -284,7 +258,7 @@ No magic crashes - memory allocation and spawning return `Error<T>` types that m
 Immutable `Map`, `Set`, `Array` from the collections library:
 
 ```typescript
-import { Map } from "collections"
+import { Map } from "collections";
 
 const users = Map.empty<string, User>();
 const updated = users.set("alice", user);  // returns new Map
@@ -292,38 +266,33 @@ const removed = updated.delete("alice");   // returns new Map
 ```
 
 ### Explicit error handling
-No exceptions. Use union types for errors. Wrap error types in `Error<T>` to distinguish them from success types:
+No exceptions. Use tagged unions for results:
 
 ```typescript
-// Define error types with Error<T> wrapper
-type NotFoundError = Error<{ message: string }>;
-type NotAuthorizedError = Error<{ message: string }>;
+type FetchResult =
+  | Success { data: Data }
+  | NotFound { message: string }
+  | NotAuthorized { message: string };
 
-type Result = Data | NotFoundError | NotAuthorizedError;
-
-match(result, {
-  { :Data, value }: () => use(value),
-  { :NotFoundError, message }: () => log(message),
-  { :NotAuthorizedError, message }: () => deny(),
-});
+match (result) {
+  Success { data } => use(data),
+  NotFound { message } => print(message),
+  NotAuthorized { message } => deny(),
+}
 ```
 
-Use `try` for early return on errors (like Zig). Only `Error<T>` types propagate:
+Use `try` for early return on errors (like Zig). Mark error variants with `Error`:
 
 ```typescript
-type NotFoundError = Error<{ id: string }>;
-type DbError = Error<{ code: int }>;
+type GetUserResult =
+  | Ok { user: User }
+  | Error NotFound { id: string }
+  | Error DbError { code: int };
 
-function getProfile(id: string): Profile | NotFoundError | DbError {
-  const user = try getUser(id);        // returns early if Error<T>
-  const prefs = try getPrefs(user.id); // returns early if Error<T>
-  return { user, prefs };
-}
-
-// Multiple success types work fine - only Error<T> propagates
-function parse(input: string): User | Guest | ParseError {
-  // User and Guest are both valid returns
-  // only ParseError (an Error<T>) propagates with try
+function getProfile(id: string): GetProfileResult {
+  const user = try getUser(id);        // returns early if Error variant
+  const prefs = try getPrefs(user.id); // returns early if Error variant
+  return Ok { user, prefs };
 }
 ```
 
@@ -363,14 +332,12 @@ Compile Zap to idiomatic JavaScript - not a runtime emulation, just clean JS:
 
 ```typescript
 // Zap source
-const room = spawn(ChatRoom);
-room.cast({ :JoinMsg, username: "alice" });
-const users = room.call({ :GetUsers });
+const room = spawn(chatRoomHandler, initChatRoom);
+room.send(Join { username: "alice" });
 
 // Compiles to JavaScript
 const room = new ChatRoom();
-room.joinMsg({ username: "alice" });  // Promise<void>
-const users = await room.getUsers();  // Promise<UserList>
+await room.join({ username: "alice" });
 ```
 
 - [ ] Actors → Classes with async methods
@@ -406,17 +373,17 @@ const users = await room.getUsers();  // Promise<UserList>
 
 **Everything else is imported:**
 ```typescript
-import { Array, Map, Set } from "collections"
-import { spawn, cast, call, self, receive, link } from "actor"
-import { print, panic } from "io"
-import { read, write } from "fs"
-import { listen, connect } from "net"
-import { get, post } from "http"
-import { now, sleep } from "time"
-import { encode, decode } from "json"
-import { hash, verify } from "crypto"
-import { format } from "fmt"
-import { env, args } from "os"
+import { Array, Map, Set } from "collections";
+import { spawn, self, link } from "actor";
+import { print, panic } from "io";
+import { read, write } from "fs";
+import { listen, connect } from "net";
+import { get, post } from "http";
+import { now, sleep } from "time";
+import { encode, decode } from "json";
+import { hash, verify } from "crypto";
+import { format } from "fmt";
+import { env, args } from "os";
 ```
 
 This makes every capability explicit - AI tools can learn the module catalog and the pattern is always the same.
@@ -499,17 +466,22 @@ No mutable data structures, no shared mutable state, no data races.
 Actors are pure functions. The runtime handles the message loop.
 
 ```typescript
-// Define state type
+import { Map } from "collections";
+
+// Message type
+type ChatRoomMsg =
+  | Join { username: string, user: User }
+  | Leave { username: string };
+
+// State type
 type ChatRoomState = { users: Map<string, User> };
 
-// Actor definition - links protocol to state type
-const ChatRoom = actor<ChatRoomProtocol, ChatRoomState>();
-
 // Pure handler function
-function chatRoomHandler(state: ChatRoomState, msg: ChatRoomProtocol): ChatRoomState {
-  match(msg, {
-    { :JoinMsg, username, user }: () => ({ ...state, users: state.users.set(username, user) }),
-  })
+function chatRoomHandler(state: ChatRoomState, msg: ChatRoomMsg): ChatRoomState {
+  match (msg) {
+    Join { username, user } => { ...state, users: state.users.set(username, user) },
+    Leave { username } => { ...state, users: state.users.delete(username) },
+  }
 }
 
 // Optional init and terminate functions
@@ -529,8 +501,8 @@ const room3 = spawn(chatRoomHandler, { users: Map.empty() });    // direct state
 
 **Spawn signature:**
 ```typescript
-spawn<S>(
-  handler: (state: S, msg: P) => S,
+spawn<S, M>(
+  handler: (state: S, msg: M) => S,
   init: S | () => S,
   terminate?: (state: S) => void
 )
@@ -546,7 +518,7 @@ zap test src/chat     # runs tests in specific path
 ```
 
 ```typescript
-import { describe, it, expect, setup, singleton } from "test"
+import { describe, it, expect, setup, singleton } from "test";
 
 // Shared across all tests (one instance per test run)
 const dbPool = singleton(
@@ -638,8 +610,8 @@ const saved = try saveUser(db, validated);
 No `+` for strings. Three options:
 
 ```typescript
-import { format } from "fmt"
-import { StringBuilder } from "str"
+import { format } from "fmt";
+import { StringBuilder } from "str";
 
 // Backticks for interpolation
 const msg = `${name} has ${count} items`;
